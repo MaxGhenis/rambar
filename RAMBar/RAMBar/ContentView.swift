@@ -167,17 +167,12 @@ struct HeaderView: View {
                 .foregroundColor(.retroCyan)
                 .shadow(color: .retroCyan.opacity(0.5), radius: 4)
 
-            Text("RAM BAR")
+            Text("RAMBar")
                 .font(.system(.headline, design: .monospaced))
                 .fontWeight(.bold)
                 .foregroundColor(.retroTextPrimary)
-                .tracking(2)
 
             Spacer()
-
-            if let memory = memory {
-                StatusBadge(status: memory.status)
-            }
         }
         .padding()
         .background(Color.retroSurfaceRaised)
