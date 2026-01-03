@@ -1,0 +1,12 @@
+# Build artifacts
+RAMBar/build/
+*.xcuserstate
+xcuserdata/
+DerivedData/
+
+# Module cache
+ModuleCache.noindex/
+CompilationCache.noindex/
+
+# OS files
+.DS_Store
