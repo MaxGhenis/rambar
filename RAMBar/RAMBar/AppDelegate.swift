@@ -14,7 +14,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let button = statusItem.button {
             button.action = #selector(togglePopover)
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-            updateStatusButton()
+            // Show "Loading..." initially until memory data is available
+            button.title = "Loading..."
         }
 
         // Create popover
