@@ -25,13 +25,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         popover.animates = true
         popover.contentViewController = NSHostingController(rootView: ContentView())
 
-        // Start update timer
+        // Start update timer using scheduledTimer for proper run loop scheduling
         updateTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             self?.updateStatusButton()
             self?.checkMemoryPressure()
         }
+        // Also add to common mode so timer fires during UI interactions
+        RunLoop.main.add(updateTimer!, forMode: .common)
 
-        // Initial update
+        // Immediate update - call directly, we're already on main thread
         updateStatusButton()
     }
 
