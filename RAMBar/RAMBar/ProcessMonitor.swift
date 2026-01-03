@@ -225,8 +225,13 @@ class ProcessMonitor {
         var tabs: [ChromeTab] = []
         for (index, process) in processes.prefix(15).enumerated() {
             let info = index < tabInfo.count ? tabInfo[index] : (title: "Chrome Tab \(index + 1)", url: "")
+            // Skip generic/empty tab titles
+            let title = info.title.trimmingCharacters(in: .whitespaces)
+            if title.isEmpty || title.lowercased() == "chrome" || title.lowercased() == "new tab" {
+                continue
+            }
             tabs.append(ChromeTab(
-                title: String(info.title.prefix(50)),
+                title: String(title.prefix(50)),
                 url: info.url,
                 memory: process.memory
             ))

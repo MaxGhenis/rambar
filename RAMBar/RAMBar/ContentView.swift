@@ -21,64 +21,63 @@ extension Color {
     static let retroGreen = Color(hex: "00ff88")!
 }
 
+// MARK: - Helpers
+
+private func formatTotalMemory(_ memoryValues: [Double]) -> String {
+    let total = memoryValues.reduce(0, +)
+    if total >= 1024 {
+        return String(format: "%.1f GB", total / 1024)
+    } else {
+        return String(format: "%.0f MB", total)
+    }
+}
+
 struct ContentView: View {
     @StateObject private var viewModel = RAMBarViewModel()
 
     var body: some View {
         VStack(spacing: 0) {
             // Header
-            HeaderView(memory: viewModel.state.systemMemory)
+            HeaderView(memory: viewModel.isLoading ? nil : viewModel.state.systemMemory)
 
             Rectangle()
                 .fill(Color.retroBorder)
                 .frame(height: 1)
 
-            ScrollView {
-                VStack(spacing: 12) {
-                    // Memory gauge
-                    if let memory = viewModel.state.systemMemory {
-                        MemoryGaugeView(memory: memory)
-                    }
-
-                    // Apps section
-                    if !viewModel.state.apps.isEmpty {
-                        SectionView(title: "APPLICATIONS", number: "01") {
-                            AppsGridView(apps: viewModel.state.apps)
-                        }
-                    }
-
-                    // Claude Sessions
-                    if !viewModel.state.claudeSessions.isEmpty {
-                        SectionView(title: "CLAUDE CODE", number: "02") {
-                            ClaudeSessionsView(sessions: viewModel.state.claudeSessions)
-                        }
-                    }
-
-                    // Python Processes
-                    if !viewModel.state.pythonProcesses.isEmpty {
-                        SectionView(title: "PYTHON", number: "03") {
-                            PythonProcessesView(processes: viewModel.state.pythonProcesses)
-                        }
-                    }
-
-                    // VS Code
-                    if !viewModel.state.vscodeWorkspaces.isEmpty {
-                        SectionView(title: "VS CODE", number: "04") {
-                            VSCodeView(workspaces: viewModel.state.vscodeWorkspaces)
-                        }
-                    }
-
-                    // Chrome Tabs
-                    if !viewModel.state.chromeTabs.isEmpty {
-                        SectionView(title: "CHROME TABS", number: "05") {
-                            ChromeTabsView(tabs: viewModel.state.chromeTabs)
-                        }
-                    }
-
-                    // Diagnostics
-                    DiagnosticsView(diagnostics: viewModel.state.diagnostics)
+            if viewModel.isLoading {
+                // Loading state
+                Spacer()
+                VStack(spacing: 16) {
+                    ProgressView()
+                        .scaleEffect(1.5)
+                        .tint(.retroCyan)
+                    Text("Loading...")
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundColor(.retroTextDim)
                 }
-                .padding()
+                Spacer()
+            } else {
+                ScrollView {
+                    VStack(spacing: 6) {
+                        // Memory gauge
+                        if let memory = viewModel.state.systemMemory {
+                            MemoryGaugeView(memory: memory)
+                        }
+
+                        // Apps list with expandable Claude Code and Chrome
+                        AppsListView(
+                            apps: viewModel.state.apps,
+                            claudeSessions: viewModel.state.claudeSessions,
+                            chromeTabs: viewModel.state.chromeTabs
+                        )
+
+                        // Compact diagnostics
+                        if !viewModel.state.diagnostics.isEmpty {
+                            DiagnosticsCompactView(diagnostics: viewModel.state.diagnostics)
+                        }
+                    }
+                    .padding()
+                }
             }
 
             Rectangle()
@@ -97,14 +96,13 @@ struct ContentView: View {
 
 class RAMBarViewModel: ObservableObject {
     @Published var state = RAMBarState()
+    @Published var isLoading = true
 
     private var timer: Timer?
     private var isRefreshing = false
 
     init() {
-        // Initial load with just memory (fast)
-        state.systemMemory = MemoryMonitor.shared.getSystemMemory()
-        state.lastUpdate = Date()
+        // Don't load data immediately - show loading state first
 
         // Load full data in background
         refreshAsync()
@@ -149,6 +147,7 @@ class RAMBarViewModel: ObservableObject {
 
             DispatchQueue.main.async {
                 self?.state = newState
+                self?.isLoading = false
                 self?.isRefreshing = false
             }
         }
@@ -289,43 +288,317 @@ struct MemoryGaugeView: View {
 
 // MARK: - Section Container
 
-struct SectionView<Content: View>: View {
+struct ExpandableSection<Content: View>: View {
     let title: String
-    let number: String
+    let icon: String
+    let summary: String
+    let accentColor: Color
     let content: Content
 
-    init(title: String, number: String, @ViewBuilder content: () -> Content) {
+    @State private var isExpanded = false
+
+    init(
+        title: String,
+        icon: String,
+        summary: String,
+        accentColor: Color = .retroCyan,
+        @ViewBuilder content: () -> Content
+    ) {
         self.title = title
-        self.number = number
+        self.icon = icon
+        self.summary = summary
+        self.accentColor = accentColor
         self.content = content()
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Text(number)
-                    .font(.system(.caption2, design: .monospaced))
-                    .fontWeight(.bold)
-                    .foregroundColor(.retroVoid)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.retroCyan)
-                    .cornerRadius(3)
-                    .shadow(color: .retroCyan.opacity(0.4), radius: 3)
+        VStack(alignment: .leading, spacing: 0) {
+            // Header - clickable
+            Button(action: {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    isExpanded.toggle()
+                }
+            }) {
+                HStack(spacing: 10) {
+                    // Icon
+                    Image(systemName: icon)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(isExpanded ? accentColor : .retroTextDim)
+                        .frame(width: 16)
 
-                Text(title)
-                    .font(.system(.caption, design: .monospaced))
-                    .fontWeight(.bold)
-                    .foregroundColor(.retroTextDim)
-                    .tracking(1.5)
+                    // Title
+                    Text(title)
+                        .font(.system(.caption, design: .monospaced))
+                        .fontWeight(.bold)
+                        .foregroundColor(isExpanded ? .retroTextPrimary : .retroTextDim)
+                        .tracking(1)
+
+                    Spacer()
+
+                    // Summary (when collapsed)
+                    if !isExpanded {
+                        Text(summary)
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundColor(.retroTextMuted)
+                            .transition(.opacity)
+                    }
+
+                    // Chevron
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(isExpanded ? accentColor : .retroTextMuted)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(isExpanded ? accentColor.opacity(0.08) : Color.retroSurfaceRaised)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(isExpanded ? accentColor.opacity(0.3) : Color.retroBorder, lineWidth: 1)
+                )
             }
+            .buttonStyle(.plain)
 
-            content
+            // Content - animated reveal
+            if isExpanded {
+                VStack(spacing: 4) {
+                    content
+                }
+                .padding(.top, 8)
+            }
         }
     }
 }
 
-// MARK: - Apps Grid
+// MARK: - Apps List
+
+struct AppsListView: View {
+    let apps: [AppMemory]
+    let claudeSessions: [ClaudeSession]
+    let chromeTabs: [ChromeTab]
+
+    // Keep expanded state here so it persists across timer refreshes
+    @State private var claudeExpanded = false
+    @State private var chromeExpanded = false
+
+    var body: some View {
+        VStack(spacing: 4) {
+            ForEach(apps) { app in
+                if app.name == "Claude Code" && !claudeSessions.isEmpty {
+                    ExpandableAppRow(
+                        app: app,
+                        detailCount: claudeSessions.count,
+                        detailLabel: "sessions",
+                        isExpanded: $claudeExpanded
+                    ) {
+                        ClaudeSessionsView(sessions: claudeSessions)
+                    }
+                } else if app.name == "Chrome" && !chromeTabs.isEmpty {
+                    ExpandableAppRow(
+                        app: app,
+                        detailCount: chromeTabs.count,
+                        detailLabel: "tabs",
+                        isExpanded: $chromeExpanded
+                    ) {
+                        ChromeTabsView(tabs: chromeTabs)
+                    }
+                } else {
+                    AppRowView(app: app)
+                }
+            }
+        }
+    }
+}
+
+struct AppRowView: View {
+    let app: AppMemory
+    @State private var isHovered = false
+
+    var body: some View {
+        let accentColor = Color(hex: app.color) ?? .retroCyan
+
+        Button(action: activateApp) {
+            HStack(spacing: 10) {
+                // Color accent bar
+                Rectangle()
+                    .fill(accentColor)
+                    .frame(width: 3, height: 32)
+                    .cornerRadius(1.5)
+
+                // App name
+                Text(app.name)
+                    .font(.system(.caption, design: .monospaced))
+                    .fontWeight(.medium)
+                    .foregroundColor(.retroTextPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                // Process count
+                Text("\(app.processCount) proc")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundColor(.retroTextMuted)
+
+                // Memory
+                Text(app.formattedMemory)
+                    .font(.system(.caption, design: .monospaced))
+                    .fontWeight(.bold)
+                    .foregroundColor(memoryColor)
+                    .frame(width: 70, alignment: .trailing)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(isHovered ? accentColor.opacity(0.1) : Color.retroSurfaceRaised)
+            .cornerRadius(6)
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(isHovered ? accentColor.opacity(0.4) : Color.retroBorder, lineWidth: 1)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovered = hovering
+        }
+    }
+
+    var memoryColor: Color {
+        if app.memoryGB >= 2 { return .retroMagenta }
+        if app.memoryGB >= 1 { return .retroAmber }
+        return .retroGreen
+    }
+
+    func activateApp() {
+        let bundleIds: [String: String] = [
+            "Python": "org.python.python",
+            "VS Code": "com.microsoft.VSCode",
+            "WhatsApp": "net.whatsapp.WhatsApp",
+            "Slack": "com.tinyspeck.slackmacgap",
+            "Safari": "com.apple.Safari",
+            "Node.js": "com.apple.Terminal", // Node usually runs in terminal
+            "Finder": "com.apple.finder",
+            "Mail": "com.apple.mail",
+            "Messages": "com.apple.MobileSMS",
+            "Spotify": "com.spotify.client",
+            "Discord": "com.hnc.Discord",
+            "Zoom": "us.zoom.xos",
+            "Firefox": "org.mozilla.firefox",
+            "Brave": "com.brave.Browser",
+            "Arc": "company.thebrowser.Browser",
+            "Notion": "notion.id",
+            "Figma": "com.figma.Desktop",
+            "Docker": "com.docker.docker",
+            "Terminal": "com.apple.Terminal",
+            "iTerm": "com.googlecode.iterm2",
+            "Obsidian": "md.obsidian",
+        ]
+
+        if let bundleId = bundleIds[app.name],
+           let runningApp = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first {
+            runningApp.activate(options: .activateIgnoringOtherApps)
+        } else {
+            // Fallback: try to find by app name
+            let workspace = NSWorkspace.shared
+            if let appURL = workspace.urlForApplication(withBundleIdentifier: app.name.lowercased()) {
+                workspace.open(appURL)
+            }
+        }
+    }
+}
+
+struct ExpandableAppRow<Content: View>: View {
+    let app: AppMemory
+    let detailCount: Int
+    let detailLabel: String
+    @Binding var isExpanded: Bool
+    let content: Content
+
+    init(app: AppMemory, detailCount: Int, detailLabel: String, isExpanded: Binding<Bool>, @ViewBuilder content: () -> Content) {
+        self.app = app
+        self.detailCount = detailCount
+        self.detailLabel = detailLabel
+        self._isExpanded = isExpanded
+        self.content = content()
+    }
+
+    var body: some View {
+        let accentColor = Color(hex: app.color) ?? .retroCyan
+
+        VStack(spacing: 0) {
+            // Main row - clickable
+            Button(action: {
+                isExpanded.toggle()
+            }) {
+                HStack(spacing: 10) {
+                    // Color accent bar
+                    Rectangle()
+                        .fill(accentColor)
+                        .frame(width: 3, height: 32)
+                        .cornerRadius(1.5)
+
+                    // App name
+                    Text(app.name)
+                        .font(.system(.caption, design: .monospaced))
+                        .fontWeight(.medium)
+                        .foregroundColor(.retroTextPrimary)
+
+                    // Detail count badge
+                    Text("\(detailCount) \(detailLabel)")
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundColor(accentColor)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(accentColor.opacity(0.15))
+                        .cornerRadius(3)
+
+                    Spacer()
+
+                    // Memory
+                    Text(app.formattedMemory)
+                        .font(.system(.caption, design: .monospaced))
+                        .fontWeight(.bold)
+                        .foregroundColor(memoryColor)
+
+                    // Chevron - animate rotation smoothly
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(isExpanded ? accentColor : .retroTextMuted)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .animation(.easeInOut(duration: 0.15), value: isExpanded)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(isExpanded ? accentColor.opacity(0.08) : Color.retroSurfaceRaised)
+                .animation(.easeInOut(duration: 0.15), value: isExpanded)
+                .cornerRadius(6)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(isExpanded ? accentColor.opacity(0.4) : Color.retroBorder, lineWidth: 1)
+                )
+                .contentShape(Rectangle()) // Ensure entire row is tappable
+            }
+            .buttonStyle(.plain)
+
+            // Expanded content
+            if isExpanded {
+                VStack(spacing: 4) {
+                    content
+                }
+                .padding(.top, 6)
+                .padding(.leading, 13) // Align with content after accent bar
+            }
+        }
+    }
+
+    var memoryColor: Color {
+        if app.memoryGB >= 2 { return .retroMagenta }
+        if app.memoryGB >= 1 { return .retroAmber }
+        return .retroGreen
+    }
+}
+
+// MARK: - Apps Grid (legacy)
 
 struct AppsGridView: View {
     let apps: [AppMemory]
@@ -397,7 +670,7 @@ struct ClaudeSessionsView: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            ForEach(sessions.prefix(5)) { session in
+            ForEach(sessions) { session in
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
@@ -448,7 +721,7 @@ struct PythonProcessesView: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            ForEach(processes.prefix(5)) { process in
+            ForEach(processes) { process in
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(process.script)
@@ -522,7 +795,7 @@ struct ChromeTabsView: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            ForEach(tabs.prefix(5)) { tab in
+            ForEach(tabs) { tab in
                 HStack {
                     Text(tab.title)
                         .font(.system(.caption, design: .monospaced))
@@ -673,6 +946,73 @@ struct DiagnosticRowView: View {
     }
 }
 
+// MARK: - Compact Diagnostics
+
+struct DiagnosticsCompactView: View {
+    let diagnostics: [Diagnostic]
+
+    var body: some View {
+        if diagnostics.isEmpty { return AnyView(EmptyView()) }
+
+        return AnyView(
+            HStack(spacing: 8) {
+                ForEach(diagnostics.prefix(4)) { diagnostic in
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(diagnosticColor(diagnostic.severity))
+                            .frame(width: 6, height: 6)
+                            .shadow(color: diagnosticColor(diagnostic.severity).opacity(0.5), radius: 2)
+
+                        Text(shortMessage(diagnostic.message))
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundColor(.retroTextMuted)
+                            .lineLimit(1)
+                    }
+                }
+
+                Spacer()
+
+                Button(action: openActivityMonitor) {
+                    Image(systemName: "gauge.with.dots.needle.bottom.50percent")
+                        .font(.caption2)
+                        .foregroundColor(.retroTextMuted)
+                }
+                .buttonStyle(.plain)
+                .help("Open Activity Monitor")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.retroSurfaceRaised)
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color.retroBorder, lineWidth: 1)
+            )
+            .cornerRadius(6)
+        )
+    }
+
+    func shortMessage(_ message: String) -> String {
+        if message.contains("Nominal") { return "OK" }
+        if message.contains("Chrome") { return "Chrome" }
+        if message.contains("Memory") { return "RAM" }
+        if message.contains("VS Code") { return "VSC" }
+        if message.contains("Claude") { return "Claude" }
+        return String(message.prefix(8))
+    }
+
+    func diagnosticColor(_ severity: DiagnosticSeverity) -> Color {
+        switch severity {
+        case .info: return .retroGreen
+        case .warning: return .retroAmber
+        case .critical: return .retroMagenta
+        }
+    }
+
+    func openActivityMonitor() {
+        NSWorkspace.shared.launchApplication("Activity Monitor")
+    }
+}
+
 // MARK: - Footer
 
 struct FooterView: View {
@@ -686,27 +1026,6 @@ struct FooterView: View {
                 .tracking(0.5)
 
             Spacer()
-
-            Button(action: {
-                FullDashboardWindowController.shared.showWindow()
-            }) {
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.caption2)
-                    Text("FULL")
-                        .font(.system(.caption, design: .monospaced))
-                        .fontWeight(.bold)
-                        .tracking(1)
-                }
-            }
-            .buttonStyle(.plain)
-            .foregroundColor(.retroCyan)
-            .help("Open full dashboard window")
-
-            Rectangle()
-                .fill(Color.retroBorder)
-                .frame(width: 1, height: 12)
-                .padding(.horizontal, 6)
 
             Button("QUIT") {
                 NSApplication.shared.terminate(nil)
