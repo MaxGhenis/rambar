@@ -2,26 +2,26 @@
 
 ## Twitter/X
 
-Claude 4.5 Opus made me upgrade from a 16GB MacBook Air to 48GB Pro.
+Claude Opus 4.5 kept crashing my VS Code.
 
-Running multiple Claude Code sessions with subagents + Chrome + VS Code was crashing everything.
+So I built RAMBar — my first macOS app (100% Claude Code) — a menu bar monitor that shows RAM by Claude session, Chrome tab, and more.
 
-So I built RAMBar — a menu bar app that shows RAM by Claude session, Chrome tab, and more.
-
-brew install maxghenis/tap/rambar
+Demo: youtu.be/6lnQpfxJs0Y
+Install: brew install maxghenis/tap/rambar
 
 ---
 
 ## LinkedIn
 
-Claude 4.5 Opus broke my laptop.
+Claude Opus 4.5 kept crashing my VS Code.
 
-Not literally—but after it launched, my Claude Code usage exploded. Multiple sessions, subagents spawning across projects, plus Chrome tabs and VS Code workspaces. My 16GB MacBook Air couldn't keep up. VS Code kept crashing.
+Nothing wrong with the model — it was just so good that I started running 5, 6, even a dozen Claude Code sessions at once. My 16GB MacBook Air couldn't keep up. VS Code kept crashing.
 
-I upgraded to a 48GB MacBook Pro, which mostly solved it. But I still had no visibility into what was consuming memory. Activity Monitor shows processes, not answers like "which Claude session is the hog?" or "can I spawn another subagent?"
+I upgraded to a 48GB MacBook Pro, which mostly solved the crashes, but I still had no visibility into what was eating memory. Activity Monitor shows processes, but not answers like "which Claude session is the hog?" or "can I spawn another subagent?"
 
-So I built RAMBar—a native macOS menu bar app that shows RAM the way developers think about it:
+So I built RAMBar — my first macOS app, built entirely with Claude Code.
 
+It sits in your menu bar and shows RAM the way developers think about it:
 - Claude Code sessions (main vs subagent, expandable to see each)
 - Chrome tabs by memory (expandable)
 - VS Code, Python, Docker, and more
@@ -29,6 +29,7 @@ So I built RAMBar—a native macOS menu bar app that shows RAM the way developer
 
 Now I can see at a glance whether I have headroom for more subagents, or if I need to close some Chrome tabs first.
 
+Demo: https://youtu.be/6lnQpfxJs0Y
 Install: brew install maxghenis/tap/rambar
 Source: github.com/MaxGhenis/rambar
 
@@ -36,22 +37,22 @@ Source: github.com/MaxGhenis/rambar
 
 ## Bluesky
 
-Claude 4.5 Opus made me upgrade from 16GB to 48GB RAM.
+Claude Opus 4.5 kept crashing my VS Code.
 
-Multiple Claude Code sessions + subagents + Chrome was crashing everything.
+Built RAMBar — my first macOS app (100% Claude Code) — to see memory by Claude session, Chrome tab, VS Code workspace.
 
-Built RAMBar to see memory by Claude session, Chrome tab, VS Code workspace.
-
+Demo: youtu.be/6lnQpfxJs0Y
 brew install maxghenis/tap/rambar
 
 ---
 
 ## Threads
 
-My 16GB MacBook Air couldn't handle Claude 4.5 Opus.
+Claude Opus 4.5 kept crashing my VS Code.
 
-Running multiple Claude Code sessions with subagents was crashing VS Code constantly. Upgraded to 48GB, but still wanted visibility into what's eating RAM.
+I was running too many Claude Code sessions at once. Upgraded from 16GB to 48GB, but still had no visibility into what's eating RAM.
 
-Built RAMBar — shows memory by Claude session (main vs subagent), Chrome tab, and more. Click to expand details or activate apps.
+Built RAMBar — my first macOS app, made entirely with Claude Code. Shows memory by Claude session (main vs subagent), Chrome tab, and more.
 
+Demo: youtu.be/6lnQpfxJs0Y
 brew install maxghenis/tap/rambar
