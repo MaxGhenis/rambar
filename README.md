@@ -36,7 +36,10 @@ brew install --cask rambar
 1. Download `RAMBar.zip` from [Releases](../../releases)
 2. Unzip and drag RAMBar to Applications
 3. Launch RAMBar from Applications
-4. **First launch**: Right-click → Open (to bypass Gatekeeper for unsigned app)
+4. **First launch**: macOS will block the app since it's not notarized. To open it:
+   - Open **System Settings → Privacy & Security**
+   - Scroll down to see **"RAMBar" was blocked**
+   - Click **Open Anyway** and enter your password
 
 ### Build from Source
 
