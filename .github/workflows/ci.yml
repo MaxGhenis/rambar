@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tests (SPM)
+        run: cd RAMBar && swift test
+
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build app (xcodebuild)
+        run: |
+          cd RAMBar
+          xcodebuild -scheme RAMBar -configuration Release -derivedDataPath build build
