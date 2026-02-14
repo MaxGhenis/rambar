@@ -6,6 +6,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var popover: NSPopover!
     private var updateTimer: Timer?
     private var lastMemoryWarningTime: Date?
+    private var contentView: ContentView?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Create status bar item
@@ -19,14 +20,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // Create popover
+        let view = ContentView()
+        contentView = view
         popover = NSPopover()
         popover.contentSize = NSSize(width: 380, height: 520)
         popover.behavior = .transient
         popover.animates = true
-        popover.contentViewController = NSHostingController(rootView: ContentView())
+        popover.contentViewController = NSHostingController(rootView: view)
 
-        // Start update timer
-        updateTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+        // Start update timer — 5s is responsive enough for a menu bar icon
+        updateTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             self?.updateStatusButton()
             self?.checkMemoryPressure()
         }
@@ -47,7 +50,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if popover.isShown {
             popover.performClose(nil)
+            contentView?.setPopoverVisible(false)
         } else {
+            contentView?.setPopoverVisible(true)
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
 
             // Ensure popover window is key

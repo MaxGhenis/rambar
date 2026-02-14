@@ -21,24 +21,17 @@ extension Color {
     static let retroGreen = Color(hex: "00ff88")!
 }
 
-// MARK: - Helpers
-
-private func formatTotalMemory(_ memoryValues: [Double]) -> String {
-    let total = memoryValues.reduce(0, +)
-    if total >= 1024 {
-        return String(format: "%.1f GB", total / 1024)
-    } else {
-        return String(format: "%.0f MB", total)
-    }
-}
-
 struct ContentView: View {
     @StateObject private var viewModel = RAMBarViewModel()
+
+    func setPopoverVisible(_ visible: Bool) {
+        viewModel.setPopoverVisible(visible)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             // Header
-            HeaderView(memory: viewModel.isLoading ? nil : viewModel.state.systemMemory)
+            HeaderView(memory: viewModel.isLoading ? nil : viewModel.state.systemMemory, onRefresh: { viewModel.refreshAsync() }, isRefreshing: viewModel.isRefreshing)
 
             Rectangle()
                 .fill(Color.retroBorder)
@@ -61,7 +54,7 @@ struct ContentView: View {
                     VStack(spacing: 6) {
                         // Memory gauge
                         if let memory = viewModel.state.systemMemory {
-                            MemoryGaugeView(memory: memory)
+                            MemoryGaugeView(memory: memory, history: viewModel.state.memoryHistory)
                         }
 
                         // Apps list with expandable Claude Code and Chrome
@@ -87,7 +80,7 @@ struct ContentView: View {
             // Footer
             FooterView(lastUpdate: viewModel.state.lastUpdate)
         }
-        .frame(width: 380, height: 520)
+        .frame(width: 380, height: 560)
         .background(Color.retroSurface)
     }
 }
@@ -97,26 +90,36 @@ struct ContentView: View {
 class RAMBarViewModel: ObservableObject {
     @Published var state = RAMBarState()
     @Published var isLoading = true
+    @Published var isRefreshing = false
 
     private var timer: Timer?
-    private var isRefreshing = false
 
     init() {
-        // Don't load data immediately - show loading state first
-
-        // Load full data in background
+        // Load full data in background on first open
         refreshAsync()
-
-        // Set up timer with proper run loop mode for menu bar apps
-        let t = Timer(timeInterval: 3.0, repeats: true) { [weak self] _ in
-            self?.refreshAsync()
-        }
-        RunLoop.main.add(t, forMode: .common)
-        timer = t
     }
 
     deinit {
         timer?.invalidate()
+    }
+
+    /// Start/stop the refresh timer based on popover visibility.
+    /// No point polling every 3s when the popover is closed — this is the
+    /// main fix for the "significant energy" warning.
+    func setPopoverVisible(_ visible: Bool) {
+        if visible {
+            // Refresh immediately when opened, then every 3s
+            refreshAsync()
+            guard timer == nil else { return }
+            let t = Timer(timeInterval: 3.0, repeats: true) { [weak self] _ in
+                self?.refreshAsync()
+            }
+            RunLoop.main.add(t, forMode: .common)
+            timer = t
+        } else {
+            timer?.invalidate()
+            timer = nil
+        }
     }
 
     func refreshAsync() {
@@ -127,12 +130,13 @@ class RAMBarViewModel: ObservableObject {
             // Get system memory (fast, no shell)
             let memory = MemoryMonitor.shared.getSystemMemory()
 
-            // Get process data (uses shell - can be slow)
-            let apps = ProcessMonitor.shared.getAppMemory()
-            let claude = ProcessMonitor.shared.getClaudeSessions()
-            let python = ProcessMonitor.shared.getPythonProcesses()
-            let vscode = ProcessMonitor.shared.getVSCodeWorkspaces()
-            let chrome = ProcessMonitor.shared.getChromeTabs()
+            // Get process data — single ps aux call, reused across all queries
+            let processes = ProcessMonitor.shared.getProcessList()
+            let apps = ProcessMonitor.shared.getAppMemory(from: processes)
+            let claude = ProcessMonitor.shared.getClaudeSessions(from: processes)
+            let python = ProcessMonitor.shared.getPythonProcesses(from: processes)
+            let vscode = ProcessMonitor.shared.getVSCodeWorkspaces(from: processes)
+            let chrome = ProcessMonitor.shared.getChromeTabs(from: processes)
 
             var newState = RAMBarState()
             newState.systemMemory = memory
@@ -141,9 +145,14 @@ class RAMBarViewModel: ObservableObject {
             newState.pythonProcesses = python
             newState.vscodeWorkspaces = vscode
             newState.chromeTabs = chrome
-            newState.vscodeRunning = CrashDetector.shared.vscodeRunning
             newState.lastUpdate = Date()
             newState.diagnostics = ProcessMonitor.shared.generateDiagnostics(state: newState)
+
+            // Track memory history (last 30 readings)
+            var history = self?.state.memoryHistory ?? []
+            history.append(memory.usagePercent)
+            if history.count > 30 { history.removeFirst(history.count - 30) }
+            newState.memoryHistory = history
 
             DispatchQueue.main.async {
                 self?.state = newState
@@ -158,6 +167,8 @@ class RAMBarViewModel: ObservableObject {
 
 struct HeaderView: View {
     let memory: SystemMemory?
+    var onRefresh: (() -> Void)? = nil
+    var isRefreshing: Bool = false
 
     var body: some View {
         HStack {
@@ -172,6 +183,22 @@ struct HeaderView: View {
                 .foregroundColor(.retroTextPrimary)
 
             Spacer()
+
+            if let memory = memory {
+                StatusBadge(status: memory.status)
+            }
+
+            if let onRefresh = onRefresh {
+                Button(action: onRefresh) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.retroTextDim)
+                        .rotationEffect(.degrees(isRefreshing ? 360 : 0))
+                        .animation(isRefreshing ? .linear(duration: 0.8).repeatForever(autoreverses: false) : .default, value: isRefreshing)
+                }
+                .buttonStyle(.plain)
+                .help("Refresh now")
+            }
         }
         .padding()
         .background(Color.retroSurfaceRaised)
@@ -217,6 +244,7 @@ struct StatusBadge: View {
 
 struct MemoryGaugeView: View {
     let memory: SystemMemory
+    var history: [Double] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -258,6 +286,12 @@ struct MemoryGaugeView: View {
             }
             .frame(height: 10)
 
+            // Sparkline showing memory trend
+            if history.count >= 2 {
+                SparklineView(values: history, color: gaugeColor)
+                    .frame(height: 24)
+            }
+
             HStack {
                 Text("0 GB")
                     .font(.system(.caption2, design: .monospaced))
@@ -282,6 +316,72 @@ struct MemoryGaugeView: View {
         case .nominal: return .retroGreen
         case .warning: return .retroAmber
         case .critical: return .retroMagenta
+        }
+    }
+}
+
+// MARK: - Sparkline
+
+struct SparklineView: View {
+    let values: [Double]
+    let color: Color
+
+    private let warningThreshold: Double = 70
+    private let criticalThreshold: Double = 85
+
+    var body: some View {
+        GeometryReader { geometry in
+            let minVal = (values.min() ?? 0) - 2
+            let maxVal = (values.max() ?? 100) + 2
+            let range = max(maxVal - minVal, 1)
+
+            // Threshold lines
+            ForEach([warningThreshold, criticalThreshold], id: \.self) { threshold in
+                if threshold >= minVal && threshold <= maxVal {
+                    let y = geometry.size.height * (1 - CGFloat((threshold - minVal) / range))
+                    Path { path in
+                        path.move(to: CGPoint(x: 0, y: y))
+                        path.addLine(to: CGPoint(x: geometry.size.width, y: y))
+                    }
+                    .stroke(
+                        threshold == criticalThreshold ? Color.retroMagenta.opacity(0.3) : Color.retroAmber.opacity(0.3),
+                        style: StrokeStyle(lineWidth: 0.5, dash: [4, 3])
+                    )
+                }
+            }
+
+            // Data line
+            Path { path in
+                for (index, value) in values.enumerated() {
+                    let x = geometry.size.width * CGFloat(index) / CGFloat(max(values.count - 1, 1))
+                    let y = geometry.size.height * (1 - CGFloat((value - minVal) / range))
+
+                    if index == 0 {
+                        path.move(to: CGPoint(x: x, y: y))
+                    } else {
+                        path.addLine(to: CGPoint(x: x, y: y))
+                    }
+                }
+            }
+            .stroke(color, lineWidth: 1.5)
+
+            // Fill below the line
+            Path { path in
+                for (index, value) in values.enumerated() {
+                    let x = geometry.size.width * CGFloat(index) / CGFloat(max(values.count - 1, 1))
+                    let y = geometry.size.height * (1 - CGFloat((value - minVal) / range))
+
+                    if index == 0 {
+                        path.move(to: CGPoint(x: x, y: geometry.size.height))
+                        path.addLine(to: CGPoint(x: x, y: y))
+                    } else {
+                        path.addLine(to: CGPoint(x: x, y: y))
+                    }
+                }
+                path.addLine(to: CGPoint(x: geometry.size.width, y: geometry.size.height))
+                path.closeSubpath()
+            }
+            .fill(color.opacity(0.15))
         }
     }
 }
@@ -473,6 +573,7 @@ struct AppRowView: View {
         let bundleIds: [String: String] = [
             "Python": "org.python.python",
             "VS Code": "com.microsoft.VSCode",
+            "Cursor": "com.todesktop.230313mzl4w4u92",
             "WhatsApp": "net.whatsapp.WhatsApp",
             "Slack": "com.tinyspeck.slackmacgap",
             "Safari": "com.apple.Safari",
@@ -488,10 +589,13 @@ struct AppRowView: View {
             "Arc": "company.thebrowser.Browser",
             "Notion": "notion.id",
             "Figma": "com.figma.Desktop",
+            "Granola": "com.granola.Granola",
             "Docker": "com.docker.docker",
             "Terminal": "com.apple.Terminal",
             "iTerm": "com.googlecode.iterm2",
             "Obsidian": "md.obsidian",
+            "Warp": "dev.warp.Warp-Stable",
+            "Ghostty": "com.mitchellh.ghostty",
         ]
 
         if let bundleId = bundleIds[app.name],
@@ -595,71 +699,6 @@ struct ExpandableAppRow<Content: View>: View {
         if app.memoryGB >= 2 { return .retroMagenta }
         if app.memoryGB >= 1 { return .retroAmber }
         return .retroGreen
-    }
-}
-
-// MARK: - Apps Grid (legacy)
-
-struct AppsGridView: View {
-    let apps: [AppMemory]
-
-    let columns = [
-        GridItem(.flexible()),
-        GridItem(.flexible())
-    ]
-
-    var body: some View {
-        LazyVGrid(columns: columns, spacing: 8) {
-            ForEach(apps.prefix(6)) { app in
-                AppCardView(app: app)
-            }
-        }
-    }
-}
-
-struct AppCardView: View {
-    let app: AppMemory
-
-    var body: some View {
-        let accentColor = Color(hex: app.color) ?? .retroCyan
-
-        VStack(alignment: .leading, spacing: 4) {
-            Text(app.name)
-                .font(.system(.caption, design: .monospaced))
-                .fontWeight(.medium)
-                .foregroundColor(.retroTextPrimary)
-                .lineLimit(1)
-
-            Text(app.formattedMemory)
-                .font(.system(.title3, design: .monospaced))
-                .fontWeight(.bold)
-                .foregroundColor(memoryColor)
-
-            Text("\(app.processCount) proc")
-                .font(.system(.caption2, design: .monospaced))
-                .foregroundColor(.retroTextMuted)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
-        .background(Color.retroSurfaceRaised)
-        .cornerRadius(6)
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(Color.retroBorder, lineWidth: 1)
-        )
-        .overlay(
-            Rectangle()
-                .fill(accentColor)
-                .frame(width: 3)
-                .shadow(color: accentColor.opacity(0.5), radius: 3),
-            alignment: .leading
-        )
-    }
-
-    var memoryColor: Color {
-        if app.memoryGB >= 2 { return .retroMagenta }
-        if app.memoryGB >= 1 { return .retroAmber }
-        return .retroCyan
     }
 }
 
@@ -951,10 +990,9 @@ struct DiagnosticRowView: View {
 struct DiagnosticsCompactView: View {
     let diagnostics: [Diagnostic]
 
+    @ViewBuilder
     var body: some View {
-        if diagnostics.isEmpty { return AnyView(EmptyView()) }
-
-        return AnyView(
+        if !diagnostics.isEmpty {
             HStack(spacing: 8) {
                 ForEach(diagnostics.prefix(4)) { diagnostic in
                     HStack(spacing: 4) {
@@ -988,7 +1026,7 @@ struct DiagnosticsCompactView: View {
                     .stroke(Color.retroBorder, lineWidth: 1)
             )
             .cornerRadius(6)
-        )
+        }
     }
 
     func shortMessage(_ message: String) -> String {
@@ -1020,7 +1058,7 @@ struct FooterView: View {
 
     var body: some View {
         HStack {
-            Text("LAST SYNC: \(lastUpdate, formatter: timeFormatter)")
+            Text("LAST SYNC: \(lastUpdate, formatter: formatter)")
                 .font(.system(.caption2, design: .monospaced))
                 .foregroundColor(.retroTextMuted)
                 .tracking(0.5)
@@ -1041,11 +1079,13 @@ struct FooterView: View {
         .background(Color.retroSurfaceRaised)
     }
 
-    var timeFormatter: DateFormatter {
+    private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
         f.timeStyle = .medium
         return f
-    }
+    }()
+
+    var formatter: DateFormatter { Self.timeFormatter }
 }
 
 // MARK: - Color Extension

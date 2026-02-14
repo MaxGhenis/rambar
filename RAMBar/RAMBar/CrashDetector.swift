@@ -154,7 +154,8 @@ class CrashDetector: ObservableObject {
 
     private func captureSystemState(appName: String) {
         let memory = MemoryMonitor.shared.getSystemMemory()
-        let apps = ProcessMonitor.shared.getAppMemory()
+        let processes = ProcessMonitor.shared.getProcessList()
+        let apps = ProcessMonitor.shared.getAppMemory(from: processes)
 
         let logDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".rambar")

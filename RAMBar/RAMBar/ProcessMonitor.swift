@@ -7,18 +7,32 @@ class ProcessMonitor {
 
     private init() {}
 
-    // App patterns for categorization
-    private let appPatterns: [(name: String, pattern: String, color: String)] = [
+    /// App patterns for categorization — canonical list, also mirrored in RAMBarLib for testing.
+    /// Patterns prefixed with "^" match only the start of the command (case-insensitive).
+    /// Other patterns match anywhere in the command (case-insensitive).
+    static let appPatterns: [(name: String, pattern: String, color: String)] = [
         ("Chrome", "Google Chrome", "#4285f4"),
-        ("Claude Code", "claude", "#cc785c"),
-        ("VS Code", "Code", "#007acc"),
+        ("Claude Code", "^claude", "#cc785c"),
+        ("Cursor", "Cursor", "#00bcd4"),
+        ("VS Code", "Code Helper", "#007acc"),
         ("Slack", "Slack", "#4a154b"),
+        ("Granola", "Granola", "#f59e0b"),
         ("Python", "python", "#3776ab"),
         ("Node.js", "node", "#339933"),
         ("Docker", "docker", "#2496ed"),
         ("WhatsApp", "WhatsApp", "#25d366"),
         ("Obsidian", "Obsidian", "#7c3aed"),
         ("Safari", "Safari", "#006cff"),
+        ("Arc", "Arc", "#7c3aed"),
+        ("Warp", "Warp", "#01a4ff"),
+        ("Ghostty", "ghostty", "#f97316"),
+        ("iTerm", "iTerm", "#2bbc8a"),
+        ("Figma", "Figma", "#a259ff"),
+        ("Zoom", "zoom", "#2d8cff"),
+        ("Discord", "Discord", "#5865f2"),
+        ("Spotify", "Spotify", "#1db954"),
+        ("Brave", "Brave", "#fb542b"),
+        ("Firefox", "firefox", "#ff7139"),
     ]
 
     /// Run a shell command and return output
@@ -31,20 +45,16 @@ class ProcessMonitor {
         task.standardError = errorPipe
         task.standardInput = FileHandle.nullDevice
 
-        // Use /usr/bin/env to find bash - more reliable in app context
         task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         task.arguments = ["bash", "-c", command]
 
-        // Set minimal environment - app sandbox may strip custom env vars
-        // Note: Use Foundation.ProcessInfo to avoid conflict with local ProcessInfo struct
         var env = Foundation.ProcessInfo.processInfo.environment
         env["PATH"] = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin"
         env["HOME"] = NSHomeDirectory()
         env["LANG"] = "en_US.UTF-8"
         task.environment = env
 
-        // CRITICAL: Read data BEFORE waitUntilExit to prevent deadlock
-        // when output buffer fills up
+        // Read data BEFORE waitUntilExit to prevent deadlock
         var outputData = Data()
         var errorData = Data()
 
@@ -58,7 +68,6 @@ class ProcessMonitor {
             return nil
         }
 
-        // Read output in a non-blocking way using dispatch
         let group = DispatchGroup()
 
         group.enter()
@@ -73,7 +82,6 @@ class ProcessMonitor {
             group.leave()
         }
 
-        // Wait for reads to complete (with timeout)
         let result = group.wait(timeout: .now() + 10.0)
 
         if result == .timedOut {
@@ -86,7 +94,6 @@ class ProcessMonitor {
 
         let output = String(data: outputData, encoding: .utf8)
 
-        // Log errors for debugging (only if command failed and had stderr output)
         if task.terminationStatus != 0 && !errorData.isEmpty {
             if let errorStr = String(data: errorData, encoding: .utf8), !errorStr.isEmpty {
                 print("RAMBar shell stderr for '\(command.prefix(30))...': \(errorStr.prefix(200))")
@@ -96,15 +103,14 @@ class ProcessMonitor {
         return output
     }
 
-    /// Get all running processes with memory info
+    /// Get all running processes with memory info (single ps aux call)
     func getProcessList() -> [ProcessInfo] {
-        var processes: [ProcessInfo] = []
-
         guard let output = shell("ps aux") else {
             print("Failed to run ps aux")
             return []
         }
 
+        var processes: [ProcessInfo] = []
         let lines = output.components(separatedBy: "\n").dropFirst() // Skip header
 
         for line in lines {
@@ -129,36 +135,56 @@ class ProcessMonitor {
         return processes
     }
 
-    /// Get memory usage grouped by app
-    func getAppMemory() -> [AppMemory] {
-        let processes = getProcessList()
+    /// Get memory usage grouped by app.
+    /// Uses patterns from RAMBarLib (single source of truth).
+    func getAppMemory(from processes: [ProcessInfo]) -> [AppMemory] {
         var appMemory: [String: (memory: UInt64, count: Int, color: String)] = [:]
+        var unmatchedMemory: UInt64 = 0
+        var unmatchedCount: Int = 0
 
         for process in processes {
-            for (name, pattern, color) in appPatterns {
-                if process.command.localizedCaseInsensitiveContains(pattern) {
+            var matched = false
+            for (name, pattern, color) in Self.appPatterns {
+                let matches: Bool
+                if pattern.hasPrefix("^") {
+                    let prefix = String(pattern.dropFirst())
+                    matches = process.command.lowercased().hasPrefix(prefix.lowercased())
+                } else {
+                    matches = process.command.localizedCaseInsensitiveContains(pattern)
+                }
+                if matches {
                     let current = appMemory[name] ?? (0, 0, color)
                     appMemory[name] = (current.memory + process.memory, current.count + 1, color)
+                    matched = true
                     break
                 }
             }
+            if !matched {
+                unmatchedMemory += process.memory
+                unmatchedCount += 1
+            }
         }
 
-        return appMemory.map { name, data in
+        var results = appMemory.map { name, data in
             AppMemory(name: name, memory: data.memory, processCount: data.count, color: data.color)
         }.sorted { $0.memory > $1.memory }
+
+        if unmatchedMemory > 500 * 1024 * 1024 {
+            results.append(AppMemory(name: "Other", memory: unmatchedMemory, processCount: unmatchedCount, color: "#6b7280"))
+        }
+
+        return results
     }
 
     /// Get Claude Code sessions with project info
-    func getClaudeSessions() -> [ClaudeSession] {
-        let processes = getProcessList().filter {
-            $0.command.localizedCaseInsensitiveContains("claude") && $0.memory > 50 * 1024 * 1024
+    func getClaudeSessions(from processes: [ProcessInfo]) -> [ClaudeSession] {
+        let claudeProcesses = processes.filter {
+            $0.command.lowercased().hasPrefix("claude") && $0.memory > 50 * 1024 * 1024
         }
 
         var sessions: [ClaudeSession] = []
 
-        for process in processes {
-            // Try to get working directory
+        for process in claudeProcesses {
             var workingDir = "Unknown"
             if let lsofOutput = shell("lsof -p \(process.pid) 2>/dev/null | grep cwd | awk '{print $NF}' | head -1") {
                 let dir = lsofOutput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -167,13 +193,8 @@ class ProcessMonitor {
                 }
             }
 
-            // Extract project name from path
             let pathComponents = workingDir.split(separator: "/")
-            var projectName = "Unknown"
-            if let last = pathComponents.last {
-                projectName = String(last)
-            }
-
+            let projectName = pathComponents.last.map(String.init) ?? "Unknown"
             let isSubagent = process.memory < 500 * 1024 * 1024
 
             sessions.append(ClaudeSession(
@@ -189,8 +210,8 @@ class ProcessMonitor {
     }
 
     /// Get Chrome tabs (approximation based on renderer processes)
-    func getChromeTabs() -> [ChromeTab] {
-        let processes = getProcessList().filter {
+    func getChromeTabs(from processes: [ProcessInfo]) -> [ChromeTab] {
+        let renderers = processes.filter {
             $0.command.contains("Google Chrome Helper (Renderer)")
         }.sorted { $0.memory > $1.memory }
 
@@ -223,9 +244,8 @@ class ProcessMonitor {
 
         // Match tabs with renderer processes (approximate)
         var tabs: [ChromeTab] = []
-        for (index, process) in processes.prefix(15).enumerated() {
+        for (index, process) in renderers.prefix(15).enumerated() {
             let info = index < tabInfo.count ? tabInfo[index] : (title: "Chrome Tab \(index + 1)", url: "")
-            // Skip generic/empty tab titles
             let title = info.title.trimmingCharacters(in: .whitespaces)
             if title.isEmpty || title.lowercased() == "chrome" || title.lowercased() == "new tab" {
                 continue
@@ -241,15 +261,14 @@ class ProcessMonitor {
     }
 
     /// Get Python processes
-    func getPythonProcesses() -> [PythonProcess] {
-        let processes = getProcessList().filter {
+    func getPythonProcesses(from processes: [ProcessInfo]) -> [PythonProcess] {
+        let pythonProcs = processes.filter {
             $0.command.localizedCaseInsensitiveContains("python") && $0.memory > 10 * 1024 * 1024
         }
 
-        return processes.map { process in
+        return pythonProcs.map { process in
             var script = "Python Process"
 
-            // Try to extract script name
             if let match = process.command.range(of: #"([^\s/]+\.py)"#, options: .regularExpression) {
                 script = String(process.command[match])
             } else if process.command.contains("voice-mode") {
@@ -265,17 +284,16 @@ class ProcessMonitor {
     }
 
     /// Get VS Code workspaces
-    func getVSCodeWorkspaces() -> [VSCodeWorkspace] {
-        let processes = getProcessList().filter {
+    func getVSCodeWorkspaces(from processes: [ProcessInfo]) -> [VSCodeWorkspace] {
+        let vscodeProcs = processes.filter {
             $0.command.contains("Visual Studio Code") || $0.command.contains("Code Helper")
         }
 
-        guard !processes.isEmpty else { return [] }
+        guard !vscodeProcs.isEmpty else { return [] }
 
-        let totalMemory = processes.reduce(0) { $0 + $1.memory }
-        let totalCount = processes.count
+        let totalMemory = vscodeProcs.reduce(0) { $0 + $1.memory }
+        let totalCount = vscodeProcs.count
 
-        // Get window names via AppleScript
         var windows: [String] = []
 
         if let output = shell("""
@@ -300,7 +318,6 @@ class ProcessMonitor {
 
         return windows.map { window in
             var name = window
-            // Extract workspace name from window title like "file.swift — ProjectName [SSH: ...]"
             if let range = window.range(of: " — ") {
                 let afterDash = String(window[range.upperBound...])
                 name = afterDash.components(separatedBy: " [").first ?? afterDash
@@ -313,7 +330,6 @@ class ProcessMonitor {
     func generateDiagnostics(state: RAMBarState) -> [Diagnostic] {
         var diagnostics: [Diagnostic] = []
 
-        // Check memory pressure
         if let mem = state.systemMemory {
             if mem.usagePercent > 90 {
                 diagnostics.append(Diagnostic(
@@ -328,7 +344,6 @@ class ProcessMonitor {
             }
         }
 
-        // Check Claude sessions
         let mainSessions = state.claudeSessions.filter { !$0.isSubagent }.count
         if mainSessions > 3 {
             diagnostics.append(Diagnostic(
@@ -337,19 +352,10 @@ class ProcessMonitor {
             ))
         }
 
-        // Check Chrome memory
         if let chrome = state.apps.first(where: { $0.name == "Chrome" }), chrome.memoryGB > 4 {
             diagnostics.append(Diagnostic(
                 message: "Chrome using \(chrome.formattedMemory)",
                 severity: .warning
-            ))
-        }
-
-        // Check VSCode
-        if !state.vscodeRunning {
-            diagnostics.append(Diagnostic(
-                message: "VS Code not running",
-                severity: .critical
             ))
         }
 

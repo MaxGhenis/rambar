@@ -18,8 +18,8 @@ struct SystemMemory {
 
     var status: MemoryStatus {
         let pct = usagePercent
-        if pct >= 90 { return .critical }
-        if pct >= 75 { return .warning }
+        if pct >= 85 { return .critical }
+        if pct >= 70 { return .warning }
         return .nominal
     }
 }
@@ -35,13 +35,6 @@ enum MemoryStatus {
         }
     }
 
-    var color: String {
-        switch self {
-        case .nominal: return "green"
-        case .warning: return "amber"
-        case .critical: return "red"
-        }
-    }
 }
 
 // MARK: - Process Models
@@ -150,5 +143,5 @@ struct RAMBarState {
     var vscodeWorkspaces: [VSCodeWorkspace] = []
     var diagnostics: [Diagnostic] = []
     var lastUpdate: Date = Date()
-    var vscodeRunning: Bool = true
+    var memoryHistory: [Double] = []  // Last 30 usage percent readings
 }

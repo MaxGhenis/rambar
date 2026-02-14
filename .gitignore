@@ -1,5 +1,6 @@
 # Build artifacts
 RAMBar/build/
+RAMBar/.build/
 *.xcuserstate
 xcuserdata/
 DerivedData/

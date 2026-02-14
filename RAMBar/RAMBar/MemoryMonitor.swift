@@ -61,9 +61,4 @@ class MemoryMonitor {
         )
     }
 
-    /// Get memory pressure level (0.0 = no pressure, 1.0 = critical)
-    func getMemoryPressure() -> Double {
-        let memory = getSystemMemory()
-        return memory.usagePercent / 100.0
-    }
 }
